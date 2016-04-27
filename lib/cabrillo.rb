@@ -42,6 +42,34 @@ end
 
 class InvalidDataError < StandardError; end
 
+HEADER_META = {
+  'START-OF-LOG' => { :data_key => :version },
+  'CALLSIGN' => { :data_key => :callsign },
+  'CATEGORY-ASSISTED' => { :data_key => :category_assisted, :validators => ContestValidators::CATEGORY_ASSISTED },
+  'CATEGORY-BAND' => { :data_key => :category_band, :validators => ContestValidators::CATEGORY_BAND },
+  'CATEGORY-MODE' => { :data_key => :category_mode, :validators => ContestValidators::CATEGORY_MODE },
+  'CATEGORY-OPERATOR' => { :data_key => :category_operator, :validators => ContestValidators::CATEGORY_OPERATOR },
+  'CATEGORY-POWER' => { :data_key => :category_power, :validators => ContestValidators::CATEGORY_POWER },
+  'CATEGORY-STATION' => { :data_key => :category_station, :validators => ContestValidators::CATEGORY_STATION },
+  'CATEGORY-TIME' => { :data_key => :category_time, :validators => ContestValidators::CATEGORY_TIME },
+  'CATEGORY-TRANSMITTER' => { :data_key => :category_transmitter, :validators => ContestValidators::CATEGORY_TRANSMITTER },
+  'CATEGORY-OVERLAY' => { :data_key => :category_overlay, :validators => ContestValidators::CATEGORY_OVERLAY },
+  'CLAIMED-SCORE' => { :data_key => :claimed_score, :validators => ContestValidators::CLAIMED_SCORE },
+  'CLUB' => { :data_key => :club },
+  'CONTEST' => { :data_key => :contest, :validators => ContestValidators::CONTEST },
+  'CREATED-BY' => { :data_key => :created_by },
+  'EMAIL' => { :data_key => :email },
+  'LOCATION' => { :data_key => :location },
+  'NAME' => { :data_key => :name, :validators => ContestValidators::NAME },
+  'ADDRESS-CITY' => { :data_key => :address_city },
+  'ADDRESS-STATE-PROVINCE' => { :data_key => :address_state_province },
+  'ADDRESS-POSTALCODE' => { :data_key => :address_postalcode },
+  'ADDRESS-COUNTRY' => { :data_key => :address_country },
+  'ADDRESS' => { :data_key => :address, :validators => ContestValidators::ADDRESS, multi_line: true },
+  'SOAPBOX' => { :data_key => :soapbox,  :validators => ContestValidators::SOAPBOX, multi_line: true },
+  'OPERATORS' => { :data_key => :operators,  :validators => ContestValidators::OPERATORS, multi_line: true }
+}
+
 class Cabrillo
   @raise_on_invalid_data = true
   
@@ -64,6 +92,32 @@ class Cabrillo
     @version = options[:version] || CABRILLO_VERSION
   end
 
+  attr_accessor :callsign
+  attr_accessor :version
+  attr_accessor :category_assisted
+  attr_accessor :category_band
+  attr_accessor :category_mode
+  attr_accessor :category_operator
+  attr_accessor :category_power
+  attr_accessor :category_station
+  attr_accessor :category_time
+  attr_accessor :category_transmitter
+  attr_accessor :category_overlay
+  attr_accessor :claimed_score
+  attr_accessor :club
+  attr_accessor :contest
+  attr_accessor :created_by
+  attr_accessor :email
+  attr_accessor :name
+  attr_accessor :location
+  attr_accessor :address_city
+  attr_accessor :address_state_province
+  attr_accessor :address_postalcode
+  attr_accessor :address_country
+  attr_accessor :address
+  attr_accessor :soapbox
+  attr_accessor :operators
+
   # Public: Return the collected data as a Hash.
   #
   # Returns the data that was parsed (or given) as a Hash.
@@ -77,6 +131,20 @@ class Cabrillo
 
   class << self
     attr_accessor :raise_on_invalid_data
+
+    def write_file(cabrillo_info, path = nil)
+      callsign = cabrillo_info.callsign
+      if callsign.to_s.empty?
+        raise InvalidDataError, "Callsign not provided (required for filename)."
+      end
+      filename = "#{callsign}.log"
+      File.open(path ? File.join(path, filename) : filename, "w") do |file|
+        HEADER_META.each do |line_key, options|
+          data_value = cabrillo_info.send(options[:data_key])
+          write_basic_line(file, options[:line_key], data_value, options[:validators])
+        end
+      end
+    end
 
     # Public: Parses a log (a string containing newlines) into a Cabrillo
     #         instance.
@@ -94,47 +162,26 @@ class Cabrillo
         # Ignore comments. (See README.md for info.)
         next if line.start_with? '#' or line.start_with? '//' or line.empty?
 
-        # Info that can only appear once.
-        cabrillo_info.merge! split_basic_line(line, 'START-OF-LOG', :version)
-        cabrillo_info.merge! split_basic_line(line, 'CALLSIGN', :callsign)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-ASSISTED', :category_assisted, ContestValidators::CATEGORY_ASSISTED)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-BAND', :category_band, ContestValidators::CATEGORY_BAND)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-MODE', :category_mode, ContestValidators::CATEGORY_MODE)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-OPERATOR', :category_operator, ContestValidators::CATEGORY_OPERATOR)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-POWER', :category_power, ContestValidators::CATEGORY_POWER)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-STATION', :category_station, ContestValidators::CATEGORY_STATION)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-TIME', :category_time, ContestValidators::CATEGORY_TIME)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-TRANSMITTER', :category_transmitter, ContestValidators::CATEGORY_TRANSMITTER)
-        cabrillo_info.merge! split_basic_line(line, 'CATEGORY-OVERLAY', :category_overlay, ContestValidators::CATEGORY_OVERLAY)
-        cabrillo_info.merge! split_basic_line(line, 'CLAIMED-SCORE', :claimed_score, ContestValidators::CLAIMED_SCORE)
-        cabrillo_info.merge! split_basic_line(line, 'CLUB', :club)
-        cabrillo_info.merge! split_basic_line(line, 'CONTEST', :contest, ContestValidators::CONTEST)
-        cabrillo_info.merge! split_basic_line(line, 'CREATED-BY', :created_by)
-        cabrillo_info.merge! split_basic_line(line, 'EMAIL', :email)
-        cabrillo_info.merge! split_basic_line(line, 'LOCATION', :location)
-        cabrillo_info.merge! split_basic_line(line, 'NAME', :name)
-        cabrillo_info.merge! split_basic_line(line, 'ADDRESS-CITY', :address_city)
-        cabrillo_info.merge! split_basic_line(line, 'ADDRESS-STATE-PROVINCE', :address_state_province)
-        cabrillo_info.merge! split_basic_line(line, 'ADDRESS-POSTALCODE', :address_postalcode)
-        cabrillo_info.merge! split_basic_line(line, 'ADDRESS-COUNTRY', :address_country)
-
-        # TODO: It would be great to remove some of the redundancy here.
-        address = split_basic_line(line, 'ADDRESS', :address)
-        cabrillo_info[:address] << address[:address] unless address.empty?
-
-        soapbox = split_basic_line(line, 'SOAPBOX', :soapbox)
-        cabrillo_info[:soapbox] << soapbox[:soapbox] unless soapbox.empty?
-
-        club = split_basic_line(line, 'CLUB', :club)
-        cabrillo_info[:club] << club[:club] unless club.empty?
-
-        operators = split_basic_line(line, 'OPERATORS', :operators)
-        cabrillo_info[:operators] << club[:operators] unless operators.empty?
-
         # If we already parsed in a contest then we're good. If not, we don't
         # know what to parse as, so skip.
-        if line.start_with? "QSO: " and cabrillo_info[:contest]
-          cabrillo_info[:qsos] << parse_qso(line, cabrillo_info[:contest])
+        if line.start_with? "QSO: "
+          if cabrillo_info[:contest]
+            cabrillo_info[:qsos] << parse_qso(line, cabrillo_info[:contest])
+          end
+        else
+          line_key, line_value = line.split(/:\s+/, 2)
+          meta = HEADER_META[line_key]
+          next unless meta
+
+          data_key, validators = meta[:data_key], meta[:validators]
+          line_value = split_basic_line(line_key, line_value, validators)
+          if line_value
+           if meta[:multi_line]
+            cabrillo_info[data_key] << line_value unless line_value.empty?
+            else
+              cabrillo_info[data_key] = line_value
+            end
+          end
         end
       end
       Cabrillo.new(cabrillo_info)
@@ -149,45 +196,73 @@ class Cabrillo
       Cabrillo.parse(IO.read(file_path))
     end
 
-
     private
+
     # Private: Parses a specific line of the log, in most cases.
     #
     # line     - The String of log line to parse.
     # key      - The key to look for in the line.
     # hash_key - The key to use in the resulting Hash.
+    # validators - The optional collection of validators to use.
     #
     # Throws an Exception if validators are given but the data does not match
     #   one of them.
     #
     # Returns a Hash of {:hash_key => value_from_parsed_line} or nil if the key
     #   wasn't found.
-    def split_basic_line(line, key, hash_key, validators = [])
-      line_key, line_value = line.split(/:\s+/, 2)
-
-      if line_key == key
-        okay = true
-        unless validators.empty?
-          okay = false
-          validators.each do |v|
-            okay = true and break if v.class.to_s == 'Regexp' and line_value =~ v
-            okay = true and break if v.class.to_s == 'String' and line_value == v
-          end
-        end
-
-        if okay || !@raise_on_invalid_data
-          { hash_key => line_value.strip }
-        elsif !validators.empty? && @raise_on_invalid_data
-          raise InvalidDataError, "Invalid value given for key `#{line_key}`."
-        end
+    def split_basic_line(line_key, line_value, validators = nil)
+      line_value.strip! if line_value
+      valid = validate_line_value(line_value, validators)
+      if valid || !@raise_on_invalid_data
+        line_value
+      elsif validators && !validators.empty? && @raise_on_invalid_data
+        raise InvalidDataError, "Invalid value: `#{line_value}` given for key `#{line_key}`."
       else
-        { }
+        nil
       end
+    end
+
+    # Private: Writes line value of log and validates with supplied validators.
+    #
+    # file - The File instance being written
+    # line_key- The String containing the log file line key
+    # data_key- The String containing the instance data key
+    # validators - The collection of validators to use.
+    #
+    # Returns a Boolean representing the validation result.
+    def write_basic_line(file, line_key, line_value, validators)
+      return if !line_value || line_value.empty?
+      line_value.strip!
+      valid = validate_line_value(line_value, validators)
+      if valid || !@raise_on_invalid_data
+        file.puts "#{line_key}: #{line_value}"
+      elsif validators && !validators.empty? && @raise_on_invalid_data
+        raise InvalidDataError, "Invalid value: `#{line_value}` given for key `#{line_key}`"
+      end
+    end
+
+    # Private: Validates the line value of log with supplied validators.
+    #
+    # line_value - The String containing the log file line value
+    # validators - The collection of validators to use.
+    #
+    # Returns a Boolean representing the validation result.
+    def validate_line_value(line_value, validators)
+      okay = true
+      if validators && !validators.empty?
+        okay = false
+        validators.each do |v|
+          okay = true and break if v.class.to_s == 'Regexp' and line_value =~ v
+          okay = true and break if v.class.to_s == 'String' and line_value == v
+          okay = true and break if v.respond_to?(:call) and v.call(line_value)
+        end
+      end
+      okay
     end
 
     # Private: Parses a QSO: line based on the contest type.
     #
-    # qso_line - The Strnig containing the line of the logfile that we are
+    # qso_line - The String containing the line of the logfile that we are
     #   parsing. Starts with "QSO:"
     # contest  - A String, the name of the contest that we are parsing.
     #

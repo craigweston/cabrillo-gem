@@ -128,4 +128,35 @@ class ContestValidators
     'STEW-PERRY',
     'TARA-RTTY',
   ]
+
+  class LengthValidator
+
+    def initialize(length)
+      @length = length
+    end
+
+    def call(v)
+      v && v.length <= @length
+    end
+
+  end
+
+  NAME = [
+    LengthValidator.new(75)
+  ]
+
+  ADDRESS = [
+    LengthValidator.new(45)
+  ]
+
+  SOAPBOX = [
+    LengthValidator.new(75)
+  ]
+
+  OPERATORS = [
+    LengthValidator.new(75)
+  ]
+
+
+
 end
