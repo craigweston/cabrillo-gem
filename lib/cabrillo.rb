@@ -117,6 +117,7 @@ class Cabrillo
   attr_accessor :address
   attr_accessor :soapbox
   attr_accessor :operators
+  attr_accessor :qsos
 
   # Public: Return the collected data as a Hash.
   #
@@ -139,11 +140,25 @@ class Cabrillo
       end
       filename = "#{callsign}.log"
       File.open(path ? File.join(path, filename) : filename, "w") do |file|
-        HEADER_META.each do |line_key, options|
-          data_value = cabrillo_info.send(options[:data_key])
-          write_basic_line(file, options[:line_key], data_value, options[:validators])
+        write(cabrillo_info, io)
+      end
+    end
+
+    def write(cabrillo_info, io)
+      HEADER_META.each do |line_key, meta|
+        data_value = cabrillo_info.send(meta[:data_key])
+        if meta[:multi_line]
+          data_value.each do |s_line|
+            write_basic_line(io, line_key, s_line, meta[:validators])
+          end
+        else
+          write_basic_line(io, line_key, data_value, meta[:validators])
         end
       end
+      cabrillo_info.qsos.each do |qso|
+        write_qso(io, qso, cabrillo_info.contest)
+      end
+      io.puts "END-OF-LOG:"
     end
 
     # Public: Parses a log (a string containing newlines) into a Cabrillo
@@ -172,7 +187,6 @@ class Cabrillo
           line_key, line_value = line.split(/:\s+/, 2)
           meta = HEADER_META[line_key]
           next unless meta
-
           data_key, validators = meta[:data_key], meta[:validators]
           line_value = split_basic_line(line_key, line_value, validators)
           if line_value
@@ -224,18 +238,18 @@ class Cabrillo
 
     # Private: Writes line value of log and validates with supplied validators.
     #
-    # file - The File instance being written
-    # line_key- The String containing the log file line key
-    # data_key- The String containing the instance data key
+    # io - The IO stream instance being written
+    # line_key - The String containing the log file line key
+    # data_key - The String containing the instance data key
     # validators - The collection of validators to use.
     #
     # Returns a Boolean representing the validation result.
-    def write_basic_line(file, line_key, line_value, validators)
+    def write_basic_line(io, line_key, line_value, validators)
       return if !line_value || line_value.empty?
       line_value.strip!
       valid = validate_line_value(line_value, validators)
       if valid || !@raise_on_invalid_data
-        file.puts "#{line_key}: #{line_value}"
+        io.puts "#{line_key}: #{line_value}"
       elsif validators && !validators.empty? && @raise_on_invalid_data
         raise InvalidDataError, "Invalid value: `#{line_value}` given for key `#{line_key}`"
       end
@@ -258,6 +272,49 @@ class Cabrillo
         end
       end
       okay
+    end
+
+    # Private: Parses a QSO: line based on the contest type.
+    #
+    # io - The IO stream instance being written
+    # qso_line - A Hash containing the qso details
+    # contest  - A String representing the name of the contest that we are parsing.
+    def write_qso(io, qso, contest)
+      qso_values = qso.values_at(:frequency, :mode)
+
+      if @raise_on_invalid_data
+        raise InvalidDataError, "Invalid contest: #{contest}" unless ContestValidators::CONTEST.include? contest
+      end
+
+      time = qso[:time]
+      raise InvalidDataError, "Invalid qso time" unless time && @raise_on_invalid_data
+      qso_values << time.strftime('%Y-%m-%d')
+      qso_values << time.strftime('%H%M')
+
+      exchange = qso[:exchange]
+      raise InvalidDataError, "Invalid qso exchange" unless exchange && @raise_on_invalid_data
+
+      sent, received = exchange[:sent], exchange[:received]
+
+      raise InvalidDataError, "Invalid sent exchange" unless sent && @raise_on_invalid_data
+      raise InvalidDataError, "Invalid receive exchange" unless received && @raise_on_invalid_data
+
+      raise InvalidDataError, "Invalid sent callsign: #{sent[:callsign]}" unless sent[:callsign] && @raise_on_invalid_data
+      qso_values << sent[:callsign]
+
+      # extract and concat the rest of the exchange
+      case contest
+      when 'CQ-160-CW', 'CQ-160-SSB', 'CQ-WPX-RTTY', 'CQ-WPX-CW', 'CQ-WPX-SSB', 'CQ-WW-RTTY', 'CQ-WW-CW', 'CQ-WW-SSB', 'ARRL-DX-CW', 'ARRL-DX-SSB', 'IARU-HF', 'ARRL-10', 'ARRL-160', 'JIDX-CW', 'JIDX-SSB', 'STEW-PERRY', 'OCEANIA-XD-CW', 'OCEANIA-DX-SSB', 'AP-SPRINT', 'NEQP', 'ARRL-FIELD-DAY'
+        qso_values.concat sent.values_at(:rst, :exchange)
+        qso_values.concat received.values_at(:callsign, :rst, :exchange, :transmitter_id)
+      when 'ARRL-SS-CW', 'ARRL-SS-SSB'
+        qso_values.concat sent.values_at(:serial_number, :precedence, :check, :arrl_section)
+        qso_values.concat received.values_at(:callsign, :serial_number, :precedence, :check, :arrl_section)
+      end
+
+      # combine qso components
+      qso_line = qso_values.compact.collect { |v| v.strip }.join(' ')
+      io.puts "QSO: #{qso_line}"
     end
 
     # Private: Parses a QSO: line based on the contest type.
@@ -286,7 +343,7 @@ class Cabrillo
       # Store the exchange/everything else into an array (using splat) for
       #   later.
       qso[:frequency], qso[:mode], date, time, *exchange = qso_line.split
-      
+
       # Parse the date and time into a Time object.
       qso[:time] = Time.parse(DateTime.strptime("#{date} #{time}", '%Y-%m-%d %H%M').to_s)
 
@@ -307,7 +364,7 @@ class Cabrillo
         qso[:exchange][:sent][:serial_number] = exchange.shift
         qso[:exchange][:sent][:precedence] = exchange.shift
         qso[:exchange][:sent][:check] = exchange.shift
-        qso[:exchange][:sent][:arrl_section] = exchange.shift        
+        qso[:exchange][:sent][:arrl_section] = exchange.shift
 
         qso[:exchange][:received][:callsign] = exchange.shift
         qso[:exchange][:received][:serial_number] = exchange.shift
