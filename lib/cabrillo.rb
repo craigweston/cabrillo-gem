@@ -44,6 +44,8 @@ class InvalidDataError < StandardError; end
 
 HEADER_META = {
   'START-OF-LOG' => { :data_key => :version },
+  'CREATED-BY' => { :data_key => :created_by },
+  'CONTEST' => { :data_key => :contest, :validators => ContestValidators::CONTEST },
   'CALLSIGN' => { :data_key => :callsign },
   'CATEGORY-ASSISTED' => { :data_key => :category_assisted, :validators => ContestValidators::CATEGORY_ASSISTED },
   'CATEGORY-BAND' => { :data_key => :category_band, :validators => ContestValidators::CATEGORY_BAND },
@@ -56,25 +58,29 @@ HEADER_META = {
   'CATEGORY-OVERLAY' => { :data_key => :category_overlay, :validators => ContestValidators::CATEGORY_OVERLAY },
   'CLAIMED-SCORE' => { :data_key => :claimed_score, :validators => ContestValidators::CLAIMED_SCORE },
   'CLUB' => { :data_key => :club },
-  'CONTEST' => { :data_key => :contest, :validators => ContestValidators::CONTEST },
-  'CREATED-BY' => { :data_key => :created_by },
   'EMAIL' => { :data_key => :email },
-  'LOCATION' => { :data_key => :location },
   'NAME' => { :data_key => :name, :validators => ContestValidators::NAME },
+  'LOCATION' => { :data_key => :location },
+  'OPERATORS' => { :data_key => :operators,  :validators => ContestValidators::OPERATORS, multi_line: true },
+  'ADDRESS' => { :data_key => :address, :validators => ContestValidators::ADDRESS, multi_line: true },
   'ADDRESS-CITY' => { :data_key => :address_city },
   'ADDRESS-STATE-PROVINCE' => { :data_key => :address_state_province },
   'ADDRESS-POSTALCODE' => { :data_key => :address_postalcode },
   'ADDRESS-COUNTRY' => { :data_key => :address_country },
-  'ADDRESS' => { :data_key => :address, :validators => ContestValidators::ADDRESS, multi_line: true },
   'SOAPBOX' => { :data_key => :soapbox,  :validators => ContestValidators::SOAPBOX, multi_line: true },
-  'OPERATORS' => { :data_key => :operators,  :validators => ContestValidators::OPERATORS, multi_line: true }
+  'OFFTIME' => { :data_key => :offtime }
 }
 
 class Cabrillo
   @raise_on_invalid_data = true
-  
+
   CABRILLO_VERSION = '3.0' # The current version of the spec, our default.
-  
+  FREQUENCY_PAD = 5 # The reserved length for qso frequency
+  MODE_PAD = 2 # The reserved length for qso mode
+  CALLSIGN_PAD = 13 # The reserved length for callsign in qso
+  EXCHANGE_PAD = 6 # The reserved length for exchange in qso
+  RST_PAD = 3 # The reserved length for rst in qso
+
   # Public: Creates an instance of Cabrillo from a Hash of log data
   #
   # options - A Hash which contains data from a cabrillo log
@@ -117,6 +123,7 @@ class Cabrillo
   attr_accessor :address
   attr_accessor :soapbox
   attr_accessor :operators
+  attr_accessor :offtime
   attr_accessor :qsos
 
   # Public: Return the collected data as a Hash.
@@ -274,17 +281,28 @@ class Cabrillo
       okay
     end
 
+    # Private: Left pads the QSO value to appropriate length.
+    #
+    # key - A Symbol hash key for the particular qso value
+    # qso - A Hash containing qso information
+    # pad - A Integer representing expected length of value
+    def qso_value(key, qso, pad)
+      qso[key].ljust(pad, ' ')
+    end
+
     # Private: Parses a QSO: line based on the contest type.
     #
     # io - The IO stream instance being written
     # qso_line - A Hash containing the qso details
     # contest  - A String representing the name of the contest that we are parsing.
     def write_qso(io, qso, contest)
-      qso_values = qso.values_at(:frequency, :mode)
-
       if @raise_on_invalid_data
         raise InvalidDataError, "Invalid contest: #{contest}" unless ContestValidators::CONTEST.include? contest
       end
+
+      qso_values = []
+      qso_values << qso_value(:frequency, qso, FREQUENCY_PAD)
+      qso_values << qso_value(:mode, qso, MODE_PAD)
 
       time = qso[:time]
       raise InvalidDataError, "Invalid qso time" unless time && @raise_on_invalid_data
@@ -300,20 +318,27 @@ class Cabrillo
       raise InvalidDataError, "Invalid receive exchange" unless received && @raise_on_invalid_data
 
       raise InvalidDataError, "Invalid sent callsign: #{sent[:callsign]}" unless sent[:callsign] && @raise_on_invalid_data
-      qso_values << sent[:callsign]
+      qso_values << qso_value(:callsign, sent, CALLSIGN_PAD)
+
+      raise InvalidDataError, "Invalid recv callsign: #{received[:callsign]}" unless received[:callsign] && @raise_on_invalid_data
 
       # extract and concat the rest of the exchange
       case contest
       when 'CQ-160-CW', 'CQ-160-SSB', 'CQ-WPX-RTTY', 'CQ-WPX-CW', 'CQ-WPX-SSB', 'CQ-WW-RTTY', 'CQ-WW-CW', 'CQ-WW-SSB', 'ARRL-DX-CW', 'ARRL-DX-SSB', 'IARU-HF', 'ARRL-10', 'ARRL-160', 'JIDX-CW', 'JIDX-SSB', 'STEW-PERRY', 'OCEANIA-XD-CW', 'OCEANIA-DX-SSB', 'AP-SPRINT', 'NEQP', 'ARRL-FIELD-DAY'
-        qso_values.concat sent.values_at(:rst, :exchange)
-        qso_values.concat received.values_at(:callsign, :rst, :exchange, :transmitter_id)
+        qso_values << qso_value(:rst, sent, RST_PAD)
+        qso_values << qso_value(:exchange, sent, EXCHANGE_PAD)
+
+        qso_values << qso_value(:callsign, received, CALLSIGN_PAD)
+        qso_values << qso_value(:rst, received, RST_PAD)
+        qso_values << qso_value(:exchange, received, EXCHANGE_PAD)
+        qso_values << received[:transmitter_id]
       when 'ARRL-SS-CW', 'ARRL-SS-SSB'
-        qso_values.concat sent.values_at(:serial_number, :precedence, :check, :arrl_section)
-        qso_values.concat received.values_at(:callsign, :serial_number, :precedence, :check, :arrl_section)
+        qso_sent = sent.values_at(:serial_number, :precedence, :check, :arrl_section)
+        qso_recv = received.values_at(:serial_number, :precedence, :check, :arrl_section)
       end
 
       # combine qso components
-      qso_line = qso_values.compact.collect { |v| v.strip }.join(' ')
+      qso_line = qso_values.compact.join(' ').strip
       io.puts "QSO: #{qso_line}"
     end
 
