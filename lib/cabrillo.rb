@@ -145,9 +145,12 @@ class Cabrillo
       if callsign.to_s.empty?
         raise InvalidDataError, "Callsign not provided (required for filename)."
       end
+
       filename = "#{callsign}.log"
-      File.open(path ? File.join(path, filename) : filename, "w") do |file|
-        write(cabrillo_info, io)
+      filename = File.join(path, filename) if path
+
+      File.open(filename, "w") do |f|
+        write(cabrillo_info, f)
       end
     end
 
@@ -327,14 +330,13 @@ class Cabrillo
       when 'CQ-160-CW', 'CQ-160-SSB', 'CQ-WPX-RTTY', 'CQ-WPX-CW', 'CQ-WPX-SSB', 'CQ-WW-RTTY', 'CQ-WW-CW', 'CQ-WW-SSB', 'ARRL-DX-CW', 'ARRL-DX-SSB', 'IARU-HF', 'ARRL-10', 'ARRL-160', 'JIDX-CW', 'JIDX-SSB', 'STEW-PERRY', 'OCEANIA-XD-CW', 'OCEANIA-DX-SSB', 'AP-SPRINT', 'NEQP', 'ARRL-FIELD-DAY'
         qso_values << qso_value(:rst, sent, RST_PAD)
         qso_values << qso_value(:exchange, sent, EXCHANGE_PAD)
-
         qso_values << qso_value(:callsign, received, CALLSIGN_PAD)
         qso_values << qso_value(:rst, received, RST_PAD)
         qso_values << qso_value(:exchange, received, EXCHANGE_PAD)
         qso_values << received[:transmitter_id]
       when 'ARRL-SS-CW', 'ARRL-SS-SSB'
-        qso_sent = sent.values_at(:serial_number, :precedence, :check, :arrl_section)
-        qso_recv = received.values_at(:serial_number, :precedence, :check, :arrl_section)
+        qso_values << sent.values_at(:serial_number, :precedence, :check, :arrl_section)
+        qso_values << received.values_at(:serial_number, :precedence, :check, :arrl_section)
       end
 
       # combine qso components
